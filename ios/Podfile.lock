@@ -45,6 +45,9 @@ PODS:
   - GoogleUtilitiesComponents (1.1.0):
     - GoogleUtilities/Logger
   - GTMSessionFetcher/Core (2.3.0)
+  - image_cropper (0.0.4):
+    - Flutter
+    - TOCropViewController (~> 2.6.1)
   - MLImage (1.0.0-beta4)
   - MLKitCommon (9.0.0):
     - GoogleDataTransport (~> 9.0)
@@ -81,6 +84,7 @@ PODS:
   - speech_to_text (0.0.1):
     - Flutter
     - Try
+  - TOCropViewController (2.6.1)
   - Try (2.1.1)
 
 DEPENDENCIES:
@@ -89,6 +93,7 @@ DEPENDENCIES:
   - flutter_tts (from `.symlinks/plugins/flutter_tts/ios`)
   - google_mlkit_commons (from `.symlinks/plugins/google_mlkit_commons/ios`)
   - google_mlkit_text_recognition (from `.symlinks/plugins/google_mlkit_text_recognition/ios`)
+  - image_cropper (from `.symlinks/plugins/image_cropper/ios`)
   - permission_handler_apple (from `.symlinks/plugins/permission_handler_apple/ios`)
   - shared_preferences_foundation (from `.symlinks/plugins/shared_preferences_foundation/darwin`)
   - speech_to_text (from `.symlinks/plugins/speech_to_text/ios`)
@@ -108,6 +113,7 @@ SPEC REPOS:
     - MLKitVision
     - nanopb
     - PromisesObjC
+    - TOCropViewController
     - Try
 
 EXTERNAL SOURCES:
@@ -121,6 +127,8 @@ EXTERNAL SOURCES:
     :path: ".symlinks/plugins/google_mlkit_commons/ios"
   google_mlkit_text_recognition:
     :path: ".symlinks/plugins/google_mlkit_text_recognition/ios"
+  image_cropper:
+    :path: ".symlinks/plugins/image_cropper/ios"
   permission_handler_apple:
     :path: ".symlinks/plugins/permission_handler_apple/ios"
   shared_preferences_foundation:
@@ -140,6 +148,7 @@ SPEC CHECKSUMS:
   GoogleUtilities: ea963c370a38a8069cc5f7ba4ca849a60b6d7d15
   GoogleUtilitiesComponents: 679b2c881db3b615a2777504623df6122dd20afe
   GTMSessionFetcher: 3a63d75eecd6aa32c2fc79f578064e1214dfdec2
+  image_cropper: 655b3ba703c9e15e3111e79151624d6154288774
   MLImage: 7bb7c4264164ade9bf64f679b40fb29c8f33ee9b
   MLKitCommon: c1b791c3e667091918d91bda4bba69a91011e390
   MLKitTextRecognition: 9ff0c843f2723d31d4bdd0c0d17a0a18382ed23e
@@ -150,6 +159,7 @@ SPEC CHECKSUMS:
   PromisesObjC: f5707f49cb48b9636751c5b2e7d227e43fba9f47
   shared_preferences_foundation: 7036424c3d8ec98dfe75ff1667cb0cd531ec82bb
   speech_to_text: ae2abc312e619ff1c53e675a9fc4d785a15c03bb
+  TOCropViewController: edfd4f25713d56905ad1e0b9f5be3fbe0f59c863
   Try: 5ef669ae832617b3cee58cb2c6f99fb767a4ff96
 
 PODFILE CHECKSUM: 3c63482e143d1b91d2d2560aee9fb04ecc74ac7e

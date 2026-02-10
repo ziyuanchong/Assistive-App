@@ -36,6 +36,7 @@ class _HomePageState extends State<HomePage> {
   String responseOutput = ""; // NEW: Visual output for responses
   bool isListening = false;
   String currentLanguage = 'en'; // 'en' or 'zh'
+  double fontSize = 18.0; // NEW: Adjustable font size for accessibility
 
   // UI text translations
   Map<String, String> get _t => currentLanguage == 'zh' ? {
@@ -47,7 +48,7 @@ class _HomePageState extends State<HomePage> {
     'type_to_speak': '输入文字朗读',
     'demo_features': '演示功能:',
     'obstacle_detection': '📷 演示:障碍物检测',
-    'allergen_scanner': '🥤 过敏原扫描(OCR)',
+    'ocr_scanner': '📄 OCR 扫描器',
     'object_recognition': '🔍 演示:物体识别',
     'try_saying': '试着说:',
     'what_time': '• 现在几点?',
@@ -65,7 +66,7 @@ class _HomePageState extends State<HomePage> {
     'type_to_speak': 'Type text to speak',
     'demo_features': 'Demo Features:',
     'obstacle_detection': '📷 Demo: Obstacle Detection',
-    'allergen_scanner': '🥤 Allergen Scanner (OCR)',
+    'ocr_scanner': '📄 OCR Scanner',
     'object_recognition': '🔍 Demo: Object Recognition',
     'try_saying': 'Try saying:',
     'what_time': '• What time is it?',
@@ -223,8 +224,8 @@ class _HomePageState extends State<HomePage> {
               setState(() => isListening = false);
             }
           },
-          listenFor: const Duration(seconds: 10),
-          pauseFor: const Duration(seconds: 3),
+          listenFor: const Duration(seconds: 30), // Extended to 30 seconds
+          pauseFor: const Duration(seconds: 5),   // Extended pause detection
           localeId: locale,
         );
       }
@@ -389,16 +390,48 @@ class _HomePageState extends State<HomePage> {
                 ),
                 child: Column(
                   children: [
-                    Icon(
-                      isListening ? Icons.mic : Icons.mic_none,
-                      size: 40,
-                      color: isListening ? Colors.red : Colors.blue,
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        Icon(
+                          isListening ? Icons.mic : Icons.mic_none,
+                          size: 40,
+                          color: isListening ? Colors.red : Colors.blue,
+                        ),
+                        // Font size controls
+                        Row(
+                          children: [
+                            IconButton(
+                              icon: Icon(Icons.text_decrease, size: 24),
+                              onPressed: () {
+                                setState(() {
+                                  if (fontSize > 12) fontSize -= 2;
+                                });
+                              },
+                              tooltip: 'Decrease font size',
+                            ),
+                            Text(
+                              '${fontSize.toInt()}',
+                              style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+                            ),
+                            IconButton(
+                              icon: Icon(Icons.text_increase, size: 24),
+                              onPressed: () {
+                                setState(() {
+                                  if (fontSize < 36) fontSize += 2;
+                                });
+                              },
+                              tooltip: 'Increase font size',
+                            ),
+                          ],
+                        ),
+                      ],
                     ),
                     const SizedBox(height: 10),
                     Text(
                       isListening ? _t['listening']! : lastWords.isEmpty ? _t['press_mic']! : lastWords,
                       style: TextStyle(
-                        fontSize: 18,
+                        fontSize: fontSize, // Use adjustable font size
                         fontWeight: FontWeight.w500,
                         color: isListening ? Colors.red.shade700 : Colors.black87,
                       ),
@@ -438,8 +471,8 @@ class _HomePageState extends State<HomePage> {
                       const SizedBox(height: 10),
                       Text(
                         responseOutput,
-                        style: const TextStyle(
-                          fontSize: 20,
+                        style: TextStyle(
+                          fontSize: fontSize, // Use adjustable font size
                           fontWeight: FontWeight.w600,
                           color: Colors.black87,
                         ),
@@ -524,9 +557,9 @@ class _HomePageState extends State<HomePage> {
                     ),
                   );
                 },
-                icon: const Icon(Icons.local_drink, size: 24),
+                icon: const Icon(Icons.document_scanner, size: 24),
                 label: Text(
-                  _t['allergen_scanner']!,
+                  _t['ocr_scanner']!,
                   style: const TextStyle(fontSize: 16),
                 ),
                 style: ElevatedButton.styleFrom(

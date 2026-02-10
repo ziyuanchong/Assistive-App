@@ -37,6 +37,7 @@ dependencies:
   google_mlkit_text_recognition: ^0.11.0
   permission_handler: ^11.0.1
   shared_preferences: ^2.2.2 # for saving language preference
+  image_cropper: ^5.0.1
 
   # The following adds the Cupertino Icons font to your application.
   # Use with the CupertinoIcons class for iOS style icons.
