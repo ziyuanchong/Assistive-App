@@ -49,5 +49,9 @@
 	<string>This app needs speech recognition to help you communicate</string>
 	<key>NSMicrophoneUsageDescription</key>
 	<string>This app needs microphone access for voice commands</string>
+	<key>NSCameraUsageDescription</key>
+	<string>This app needs camera access to read ingredient labels and detect allergens</string>
+	<key>NSPhotoLibraryUsageDescription</key>
+	<string>This app needs photo access to analyze ingredient labels</string>
 </dict>
 </plist>
