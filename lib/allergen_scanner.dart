@@ -1,14 +1,24 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:camera/camera.dart';
 import 'package:google_mlkit_text_recognition/google_mlkit_text_recognition.dart';
 import 'package:flutter_tts/flutter_tts.dart';
 import 'package:image_cropper/image_cropper.dart';
+import 'package:vibration/vibration.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+import 'disability_selection.dart';
+import 'dart:async';
 import 'dart:io';
 
 class AllergenScanner extends StatefulWidget {
   final String language;
+  final bool autoStartLiveScan; // For blind users: auto-start live scan on open
   
-  const AllergenScanner({super.key, required this.language});
+  const AllergenScanner({
+    super.key,
+    required this.language,
+    this.autoStartLiveScan = false,
+  });
 
   @override
   State<AllergenScanner> createState() => _AllergenScannerState();
@@ -16,13 +26,23 @@ class AllergenScanner extends StatefulWidget {
 
 class _AllergenScannerState extends State<AllergenScanner> {
   CameraController? _cameraController;
-  late TextRecognizer _textRecognizer;
+  late TextRecognizer _autoTextRecognizer;
+  late TextRecognizer _latinTextRecognizer;
+  late TextRecognizer _chineseTextRecognizer;
   final FlutterTts _tts = FlutterTts();
   
   XFile? _capturedImage;
   bool _isProcessing = false;
   String _detectedText = "";
   List<String> _foundAllergens = [];
+
+  // Live scan mode: point camera at ingredients, get real-time allergen alerts (for blind users)
+  bool _liveScanEnabled = false;
+  Timer? _liveScanTimer;
+  Set<String> _lastAnnouncedAllergens = {};
+  static const Duration _liveScanInterval = Duration(seconds: 2);
+  static const Duration _allergenAnnounceDebounce = Duration(seconds: 8);
+  DateTime? _lastAllergenAnnounceTime;
   
   final Map<String, List<String>> _allergensList = {
     'en': [
@@ -52,32 +72,82 @@ class _AllergenScannerState extends State<AllergenScanner> {
     'crop': '裁剪',
     'use_photo': '使用照片',
     'allergens_found': '发现过敏原',
-    'no_allergens': '未发现过敏原',
     'detected_text': '识别的文字',
     'processing': '处理中...',
+    'live_scan': '实时扫描',
+    'live_scan_off': '关闭实时扫描',
+    'live_scan_hint': '将摄像头对准成分表，无需拍照即可听到过敏原提示',
   } : {
     'title': 'OCR Scanner',
     'retake': 'Retake',
     'crop': 'Crop',
     'use_photo': 'Use Photo',
     'allergens_found': 'Allergens Found',
-    'no_allergens': 'No Allergens',
     'detected_text': 'Detected Text',
     'processing': 'Processing...',
+    'live_scan': 'Live scan',
+    'live_scan_off': 'Stop live scan',
+    'live_scan_hint': 'Point camera at ingredients — no need to take a photo',
   };
 
   @override
   void initState() {
     super.initState();
-    _initializeTextRecognizer();
+    _initializeTextRecognizers();
     _initializeCamera();
     _initTts();
+    
+    // Auto-start live scan for blind users
+    if (widget.autoStartLiveScan) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        _startLiveScan();
+        setState(() => _liveScanEnabled = true);
+      });
+    }
   }
 
-  void _initializeTextRecognizer() {
-    _textRecognizer = widget.language == 'zh'
-        ? TextRecognizer(script: TextRecognitionScript.chinese)
-        : TextRecognizer(script: TextRecognitionScript.latin);
+  void _initializeTextRecognizers() {
+    // Many ingredient labels are mixed-language.
+    // Using an auto recognizer often works better than script-locked mode for Chinese.
+    _autoTextRecognizer = TextRecognizer();
+    _latinTextRecognizer = TextRecognizer(script: TextRecognitionScript.latin);
+    _chineseTextRecognizer = TextRecognizer(script: TextRecognitionScript.chinese);
+  }
+
+  String _normalizeForMatch(String text) {
+    // Remove whitespace/punctuation to make matching resilient to OCR line breaks.
+    // Keep CJK characters and ASCII letters/numbers.
+    return text
+        .toLowerCase()
+        .replaceAll(RegExp(r'[\s\p{P}\p{S}]+', unicode: true), '');
+  }
+
+  List<String> _allAllergensToCheck() {
+    // In Chinese UI mode, still detect English allergens (many imported products).
+    // In English mode, still detect Chinese allergens if present.
+    return [
+      ...?_allergensList['en'],
+      ...?_allergensList['zh'],
+    ];
+  }
+
+  Future<String> _extractTextFromPath(String path) async {
+    final inputImage = InputImage.fromFilePath(path);
+
+    // 1) Try auto-detect first (best for mixed Chinese/English labels)
+    final autoText = (await _autoTextRecognizer.processImage(inputImage)).text;
+
+    // 2) Also try explicit scripts and merge (helps when auto misses)
+    final latinText = (await _latinTextRecognizer.processImage(inputImage)).text;
+    final chineseText = (await _chineseTextRecognizer.processImage(inputImage)).text;
+
+    final parts = <String>[
+      autoText,
+      latinText,
+      chineseText,
+    ].map((s) => s.trim()).where((s) => s.isNotEmpty).toList();
+
+    return parts.join('\n');
   }
 
   Future<void> _initTts() async {
@@ -163,13 +233,9 @@ class _AllergenScannerState extends State<AllergenScanner> {
     });
 
     try {
-      final InputImage inputImage = InputImage.fromFilePath(_capturedImage!.path);
-      final RecognizedText recognizedText = await _textRecognizer.processImage(inputImage);
-      
-      print("📝 OCR Text (${recognizedText.text.length} chars):");
-      print(recognizedText.text);
-      
-      String fullText = recognizedText.text;
+      final String fullText = await _extractTextFromPath(_capturedImage!.path);
+      print("📝 OCR Text (${fullText.length} chars):");
+      print(fullText);
       
       setState(() {
         _detectedText = fullText;
@@ -177,13 +243,13 @@ class _AllergenScannerState extends State<AllergenScanner> {
 
       // Auto-detect allergens
       if (fullText.isNotEmpty) {
-        List<String> allergens = _allergensList[widget.language]!;
+        final normalized = _normalizeForMatch(fullText);
+        List<String> allergens = _allAllergensToCheck();
         List<String> found = [];
         
         for (String allergen in allergens) {
-          bool match = widget.language == 'zh'
-              ? fullText.contains(allergen)
-              : fullText.toLowerCase().contains(allergen.toLowerCase());
+          final a = _normalizeForMatch(allergen);
+          final match = normalized.contains(a);
           
           if (match && !found.contains(allergen)) {
             found.add(allergen);
@@ -219,6 +285,83 @@ class _AllergenScannerState extends State<AllergenScanner> {
     });
   }
 
+  /// Live scan: for blind users — point at ingredients, get vibration + TTS when allergens are detected.
+  void _toggleLiveScan() {
+    if (_liveScanEnabled) {
+      _stopLiveScan();
+      setState(() => _liveScanEnabled = false);
+    } else {
+      _startLiveScan();
+      setState(() => _liveScanEnabled = true);
+    }
+  }
+
+  void _startLiveScan() {
+    _lastAnnouncedAllergens = {};
+    _lastAllergenAnnounceTime = null;
+    _liveScanTimer?.cancel();
+    _liveScanTimer = Timer.periodic(_liveScanInterval, (_) => _runLiveScanCycle());
+    // Initial hint for blind users
+    _tts.speak(widget.language == 'zh'
+        ? '实时扫描已开启。请将手机对准成分表。'
+        : 'Live scan on. Point your phone at the ingredient list.');
+  }
+
+  void _stopLiveScan() {
+    _liveScanTimer?.cancel();
+    _liveScanTimer = null;
+  }
+
+  Future<void> _runLiveScanCycle() async {
+    if (!mounted || _cameraController == null || !_cameraController!.value.isInitialized) return;
+    if (_isProcessing) return; // skip if previous run still in progress
+
+    try {
+      _isProcessing = true;
+      final XFile image = await _cameraController!.takePicture();
+      final String path = image.path;
+
+      final String fullText = await _extractTextFromPath(path);
+      try { File(path).deleteSync(); } catch (_) {}
+
+      final normalized = _normalizeForMatch(fullText);
+      List<String> allergens = _allAllergensToCheck();
+      List<String> found = [];
+      for (String allergen in allergens) {
+        final a = _normalizeForMatch(allergen);
+        bool match = normalized.contains(a);
+        if (match && !found.contains(allergen)) found.add(allergen);
+      }
+
+      Set<String> currentSet = found.toSet();
+      bool shouldAnnounce = currentSet.isNotEmpty &&
+          (currentSet != _lastAnnouncedAllergens ||
+              (_lastAllergenAnnounceTime != null &&
+                  DateTime.now().difference(_lastAllergenAnnounceTime!) > _allergenAnnounceDebounce));
+
+      if (shouldAnnounce && mounted) {
+        _lastAnnouncedAllergens = currentSet;
+        _lastAllergenAnnounceTime = DateTime.now();
+        // Strong tactile feedback for blind users: pattern = double buzz
+        final hasVibrator = await Vibration.hasVibrator();
+        if (hasVibrator == true) {
+          Vibration.vibrate(pattern: [0, 200, 100, 200]); // double buzz
+        } else {
+          HapticFeedback.heavyImpact();
+        }
+        String list = found.join(widget.language == 'zh' ? '，' : ', ');
+        String msg = widget.language == 'zh'
+            ? '检测到过敏原：$list'
+            : 'Allergens detected: $list';
+        await _tts.speak(msg);
+      }
+    } catch (e) {
+      print("Live scan cycle error: $e");
+    } finally {
+      if (mounted) setState(() => _isProcessing = false);
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final size = MediaQuery.of(context).size;
@@ -227,7 +370,7 @@ class _AllergenScannerState extends State<AllergenScanner> {
       backgroundColor: Colors.black,
       body: Stack(
         children: [
-          // Camera or captured image (FULLSCREEN)
+          // Camera or captured image (FULLSCREEN with proper aspect ratio)
           if (_capturedImage == null) ...[
             // Live camera view
             if (_cameraController != null && _cameraController!.value.isInitialized)
@@ -244,11 +387,13 @@ class _AllergenScannerState extends State<AllergenScanner> {
             else
               Center(child: CircularProgressIndicator(color: Colors.white)),
           ] else ...[
-            // Captured image preview
-            SizedBox.expand(
+            // Captured image preview - CONTAIN instead of COVER to prevent stretching
+            Center(
               child: Image.file(
                 File(_capturedImage!.path),
-                fit: BoxFit.cover,
+                fit: BoxFit.contain, // Changed from cover to contain - adds black bars
+                width: size.width,
+                height: size.height,
               ),
             ),
           ],
@@ -277,7 +422,32 @@ class _AllergenScannerState extends State<AllergenScanner> {
                 children: [
                   IconButton(
                     icon: Icon(Icons.close, color: Colors.white, size: 32),
-                    onPressed: () => Navigator.pop(context),
+                    onPressed: () async {
+                      // Stop live scan if running
+                      _stopLiveScan();
+                      SharedPreferences prefs = await SharedPreferences.getInstance();
+                      final disability = prefs.getString('disability');
+
+                      // Blind users: exiting OCR should return to disability selection (reselect flow)
+                      if (disability == 'blind') {
+                        await prefs.remove('disability');
+                        if (mounted) {
+                          Navigator.of(context).pushReplacement(
+                            MaterialPageRoute(
+                              builder: (context) => const DisabilitySelectionScreen(),
+                            ),
+                          );
+                        }
+                        return;
+                      }
+
+                      // Deaf/Mute users: exiting OCR should return to main page (pop back)
+                      if (mounted && Navigator.of(context).canPop()) {
+                        Navigator.of(context).pop();
+                      } else if (mounted) {
+                        Navigator.of(context).pushReplacementNamed('/home');
+                      }
+                    },
                   ),
                   Expanded(
                     child: Text(
@@ -296,9 +466,49 @@ class _AllergenScannerState extends State<AllergenScanner> {
             ),
           ),
 
-          // Bottom controls (iOS style)
+          // Bottom controls
           if (_capturedImage == null) ...[
-            // Camera mode - capture button
+            // Live scan toggle (for blind users: point at label, get spoken + haptic alerts)
+            Positioned(
+              bottom: 120,
+              left: 20,
+              right: 20,
+              child: Center(
+                child: Material(
+                  color: _liveScanEnabled
+                      ? Colors.orange.withOpacity(0.9)
+                      : Colors.black54,
+                  borderRadius: BorderRadius.circular(30),
+                  child: InkWell(
+                    onTap: _toggleLiveScan,
+                    borderRadius: BorderRadius.circular(30),
+                    child: Padding(
+                      padding: EdgeInsets.symmetric(horizontal: 24, vertical: 14),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Icon(
+                            _liveScanEnabled ? Icons.stop_rounded : Icons.play_circle_filled,
+                            color: Colors.white,
+                            size: 28,
+                          ),
+                          SizedBox(width: 12),
+                          Text(
+                            _liveScanEnabled ? _t['live_scan_off']! : _t['live_scan']!,
+                            style: TextStyle(
+                              color: Colors.white,
+                              fontSize: 18,
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+            ),
+            // Camera mode - capture button (one-shot photo)
             Positioned(
               bottom: 40,
               left: 0,
@@ -358,9 +568,6 @@ class _AllergenScannerState extends State<AllergenScanner> {
                         _t['retake']!,
                         style: TextStyle(color: Colors.white, fontSize: 16),
                       ),
-                      style: TextButton.styleFrom(
-                        padding: EdgeInsets.symmetric(horizontal: 20, vertical: 12),
-                      ),
                     ),
                     
                     // Crop button
@@ -370,9 +577,6 @@ class _AllergenScannerState extends State<AllergenScanner> {
                       label: Text(
                         _t['crop']!,
                         style: TextStyle(color: Colors.white, fontSize: 16),
-                      ),
-                      style: TextButton.styleFrom(
-                        padding: EdgeInsets.symmetric(horizontal: 20, vertical: 12),
                       ),
                     ),
                     
@@ -408,7 +612,7 @@ class _AllergenScannerState extends State<AllergenScanner> {
             ),
           ],
 
-          // Results overlay (when processing complete)
+          // Results overlay
           if (_detectedText.isNotEmpty && !_isProcessing) ...[
             Positioned(
               top: MediaQuery.of(context).padding.top + 70,
@@ -519,8 +723,11 @@ class _AllergenScannerState extends State<AllergenScanner> {
 
   @override
   void dispose() {
+    _stopLiveScan();
     _cameraController?.dispose();
-    _textRecognizer.close();
+    _autoTextRecognizer.close();
+    _latinTextRecognizer.close();
+    _chineseTextRecognizer.close();
     _tts.stop();
     super.dispose();
   }

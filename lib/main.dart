@@ -3,6 +3,7 @@ import 'package:flutter_tts/flutter_tts.dart';
 import 'package:speech_to_text/speech_to_text.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'allergen_scanner.dart';
+import 'disability_selection.dart';
 
 void main() {
   runApp(const MyApp());
@@ -14,9 +15,92 @@ class MyApp extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      title: 'Assistive App',
+      title: 'Visual Audio Buddy',
       theme: ThemeData(primarySwatch: Colors.blue),
-      home: const HomePage(),
+      initialRoute: '/',
+      routes: {
+        '/': (context) => const InitialRoute(),
+        '/disability-selection': (context) => const DisabilitySelectionScreen(),
+        '/home': (context) => const HomePage(),
+        '/ocr-scanner-blind': (context) {
+          // Get language preference
+          return FutureBuilder<String>(
+            future: _getLanguage(),
+            builder: (context, snapshot) {
+              if (snapshot.hasData) {
+                return AllergenScanner(
+                  language: snapshot.data!,
+                  autoStartLiveScan: true,
+                );
+              }
+              return const Scaffold(
+                body: Center(child: CircularProgressIndicator()),
+              );
+            },
+          );
+        },
+      },
+    );
+  }
+
+  static Future<String> _getLanguage() async {
+    SharedPreferences prefs = await SharedPreferences.getInstance();
+    return prefs.getString('language') ?? 'en';
+  }
+}
+
+/// Initial route that checks for saved disability preference
+class InitialRoute extends StatefulWidget {
+  const InitialRoute({super.key});
+
+  @override
+  State<InitialRoute> createState() => _InitialRouteState();
+}
+
+class _InitialRouteState extends State<InitialRoute> {
+  @override
+  void initState() {
+    super.initState();
+    _checkDisabilityPreference();
+  }
+
+  Future<void> _checkDisabilityPreference() async {
+    SharedPreferences prefs = await SharedPreferences.getInstance();
+    String? disability = prefs.getString('disability');
+    
+    if (!mounted) return;
+    
+    if (disability == null) {
+      // No preference saved - show selection screen
+      Navigator.of(context).pushReplacementNamed('/disability-selection');
+    } else {
+      // Preference exists - route accordingly
+      String language = prefs.getString('language') ?? 'en';
+      
+      if (disability == 'blind') {
+        // Blind users go directly to OCR scanner with live scan
+        Navigator.of(context).pushReplacement(
+          MaterialPageRoute(
+            builder: (context) => AllergenScanner(
+              language: language,
+              autoStartLiveScan: true,
+            ),
+          ),
+        );
+      } else {
+        // Deaf/Mute users go to main page
+        Navigator.of(context).pushReplacementNamed('/home');
+      }
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    // Show loading while checking preference
+    return const Scaffold(
+      body: Center(
+        child: CircularProgressIndicator(),
+      ),
     );
   }
 }
@@ -33,14 +117,13 @@ class _HomePageState extends State<HomePage> {
   final SpeechToText speech = SpeechToText();
 
   String lastWords = "";
-  String responseOutput = ""; // NEW: Visual output for responses
   bool isListening = false;
-  String currentLanguage = 'en'; // 'en' or 'zh'
-  double fontSize = 18.0; // NEW: Adjustable font size for accessibility
+  String currentLanguage = 'en';
+  double fontSize = 18.0;
+  String? disability; // 'deaf', 'mute', 'blind'
 
-  // UI text translations
   Map<String, String> get _t => currentLanguage == 'zh' ? {
-    'title': '辅助应用',
+    'title': '视觉音频伙伴 (VAB)',
     'press_mic': '按麦克风并说话',
     'listening': '正在聆听...',
     'stop_listening': '停止聆听',
@@ -50,15 +133,13 @@ class _HomePageState extends State<HomePage> {
     'obstacle_detection': '📷 演示:障碍物检测',
     'ocr_scanner': '📄 OCR 扫描器',
     'object_recognition': '🔍 演示:物体识别',
-    'try_saying': '试着说:',
-    'what_time': '• 现在几点?',
-    'what_date': '• 今天几号?',
     'hello': '• 你好',
     'help': '• 帮助',
     'switch_language': '切换语言',
-    'response': '回应:',
+    'reselect_disability': '重新选择障碍类型',
+    'hide_keyboard': '收起键盘',
   } : {
-    'title': 'Assistive App',
+    'title': 'Visual Audio Buddy (VAB)',
     'press_mic': 'Press mic and speak',
     'listening': 'Listening...',
     'stop_listening': 'Stop Listening',
@@ -68,13 +149,11 @@ class _HomePageState extends State<HomePage> {
     'obstacle_detection': '📷 Demo: Obstacle Detection',
     'ocr_scanner': '📄 OCR Scanner',
     'object_recognition': '🔍 Demo: Object Recognition',
-    'try_saying': 'Try saying:',
-    'what_time': '• What time is it?',
-    'what_date': '• What\'s the date today?',
     'hello': '• Hello',
     'help': '• Help',
     'switch_language': 'Switch Language',
-    'response': 'Response:',
+    'reselect_disability': 'Reselect disability',
+    'hide_keyboard': 'Hide keyboard',
   };
 
   @override
@@ -87,9 +166,18 @@ class _HomePageState extends State<HomePage> {
     SharedPreferences prefs = await SharedPreferences.getInstance();
     setState(() {
       currentLanguage = prefs.getString('language') ?? 'en';
+      disability = prefs.getString('disability');
       lastWords = _t['press_mic']!;
     });
     await initTts();
+  }
+
+  Future<void> _reselectDisability() async {
+    // Allow deaf/mute users to reselect at any time
+    SharedPreferences prefs = await SharedPreferences.getInstance();
+    await prefs.remove('disability');
+    if (!mounted) return;
+    Navigator.of(context).pushReplacementNamed('/disability-selection');
   }
 
   Future<void> _saveLanguage(String lang) async {
@@ -97,7 +185,6 @@ class _HomePageState extends State<HomePage> {
     await prefs.setString('language', lang);
   }
 
-  // NEW: Show language selection dialog
   Future<void> _showLanguageDialog() async {
     String? selected = await showDialog<String>(
       context: context,
@@ -134,7 +221,6 @@ class _HomePageState extends State<HomePage> {
       setState(() {
         currentLanguage = selected;
         lastWords = _t['press_mic']!;
-        responseOutput = "";
       });
       await _saveLanguage(selected);
       await initTts();
@@ -149,52 +235,91 @@ class _HomePageState extends State<HomePage> {
       // Stop any ongoing speech
       await tts.stop();
       
-      // Set language
+      // Set language first
       String ttsLanguage = currentLanguage == 'zh' ? 'zh-CN' : 'en-US';
-      var result = await tts.setLanguage(ttsLanguage);
-      print("TTS Language set result: $result for $ttsLanguage");
+      var langResult = await tts.setLanguage(ttsLanguage);
+      print("TTS Language set: $langResult for $ttsLanguage");
       
-      // iOS-specific voice settings for better compatibility
-      if (currentLanguage == 'zh') {
-        await tts.setVoice({"name": "Ting-Ting", "locale": "zh-CN"});
-      } else {
-        await tts.setVoice({"name": "Samantha", "locale": "en-US"});
-      }
-      
-      await tts.setSpeechRate(0.5);
+      // Set volume to maximum (very important!)
       await tts.setVolume(1.0);
+      print("TTS Volume set to 1.0");
+      
+      // Set speech rate (not too fast, not too slow)
+      await tts.setSpeechRate(0.5);
+      
+      // Set pitch to normal
       await tts.setPitch(1.0);
       
+      // iOS-specific voice settings for better quality
+      try {
+        if (currentLanguage == 'zh') {
+          await tts.setVoice({"name": "Ting-Ting", "locale": "zh-CN"});
+        } else {
+          await tts.setVoice({"name": "Samantha", "locale": "en-US"});
+        }
+      } catch (e) {
+        print("Voice setting warning: $e");
+      }
+      
+      // Enable shared instance for iOS
+      try {
+        await tts.setSharedInstance(true);
+      } catch (e) {
+        print("Shared instance warning: $e");
+      }
+      
       // Add handlers for debugging
+      tts.setStartHandler(() {
+        print("▶️ TTS started speaking");
+      });
+      
       tts.setCompletionHandler(() {
-        print("TTS completed");
+        print("✅ TTS completed speaking");
       });
       
       tts.setErrorHandler((msg) {
-        print("TTS error: $msg");
+        print("❌ TTS error: $msg");
       });
       
-      print("TTS initialized successfully for language: $currentLanguage");
+      print("✅ TTS initialized successfully");
       
     } catch (e) {
-      print("TTS initialization error: $e");
+      print("❌ TTS initialization error: $e");
     }
   }
 
   Future<void> speak(String text) async {
-    print("Speaking: $text");
+    if (text.isEmpty) return;
     
-    // Update visual output
-    setState(() {
-      responseOutput = text;
-    });
+    print("🔊 Attempting to speak: '$text'");
     
     try {
-      await tts.stop(); // Stop any ongoing speech
+      // Stop any ongoing speech first
+      await tts.stop();
+      
+      // Re-initialize to ensure settings are correct
+      await initTts();
+      
+      // Small delay
+      await Future.delayed(Duration(milliseconds: 50));
+      
+      // Ensure volume is maximum
+      await tts.setVolume(1.0);
+      
+      // Speak the text
       var result = await tts.speak(text);
-      print("TTS speak result: $result");
+      
+      print("🔊 TTS speak result: $result");
+      
+      if (result == 0) {
+        print("⚠️ WARNING: TTS returned 0");
+        print("⚠️ Check: 1) Phone volume is up");
+        print("⚠️        2) Silent mode is OFF");
+        print("⚠️        3) Phone is not muted");
+      }
+      
     } catch (e) {
-      print("TTS speak error: $e");
+      print("❌ TTS speak error: $e");
     }
   }
 
@@ -206,10 +331,7 @@ class _HomePageState extends State<HomePage> {
       );
 
       if (available) {
-        setState(() {
-          isListening = true;
-          responseOutput = ""; // Clear previous response
-        });
+        setState(() => isListening = true);
         
         String locale = currentLanguage == 'zh' ? 'zh_CN' : 'en_US';
         
@@ -224,8 +346,8 @@ class _HomePageState extends State<HomePage> {
               setState(() => isListening = false);
             }
           },
-          listenFor: const Duration(seconds: 30), // Extended to 30 seconds
-          pauseFor: const Duration(seconds: 5),   // Extended pause detection
+          listenFor: const Duration(seconds: 30),
+          pauseFor: const Duration(seconds: 5),
           localeId: locale,
         );
       }
@@ -239,81 +361,21 @@ class _HomePageState extends State<HomePage> {
     String command = words.toLowerCase();
 
     if (currentLanguage == 'zh') {
-      // Chinese commands
-      if (command.contains('时间') || command.contains('几点')) {
-        DateTime now = DateTime.now();
-        int hour = now.hour;
-        int minute = now.minute;
-        
-        // Format time in 12-hour format with AM/PM
-        String period = hour >= 12 ? '下午' : '上午';
-        int hour12 = hour > 12 ? hour - 12 : (hour == 0 ? 12 : hour);
-        
-        String timeText = "$period$hour12点${minute}分";
-        String displayTime = "${hour.toString().padLeft(2, '0')}:${minute.toString().padLeft(2, '0')}";
-        
-        setState(() {
-          responseOutput = "现在是 $displayTime";
-        });
-        
-        await speak("现在是$timeText");
-      }
-      else if (command.contains('日期') || command.contains('几号') || command.contains('今天')) {
-        DateTime now = DateTime.now();
-        String dateText = "${now.year}年${now.month}月${now.day}日";
-        
-        setState(() {
-          responseOutput = "今天是 $dateText";
-        });
-        
-        await speak("今天是$dateText");
-      }
-      else if (command.contains('你好') || command.contains('您好')) {
+      if (command.contains('你好') || command.contains('您好')) {
         await speak("你好!我能帮您什么?");
       }
       else if (command.contains('帮助')) {
-        await speak("您可以问我时间、日期,或者直接跟我说话。我在这里协助您。");
+        await speak("您可以直接跟我说话，或用下方输入框让手机朗读。我在这里协助您。");
       }
       else {
         await speak("您说:$command");
       }
     } else {
-      // English commands
-      if (command.contains("time")) {
-        DateTime now = DateTime.now();
-        int hour = now.hour;
-        int minute = now.minute;
-        
-        // Format in 12-hour format with AM/PM
-        String period = hour >= 12 ? 'PM' : 'AM';
-        int hour12 = hour > 12 ? hour - 12 : (hour == 0 ? 12 : hour);
-        
-        String timeText = "$hour12:${minute.toString().padLeft(2, '0')} $period";
-        
-        setState(() {
-          responseOutput = "The time is $timeText";
-        });
-        
-        await speak("The time is $hour12 ${minute.toString().padLeft(2, '0')} $period");
-      }
-      else if (command.contains("date") || command.contains("today")) {
-        DateTime now = DateTime.now();
-        List<String> months = ['January', 'February', 'March', 'April', 'May', 'June',
-                               'July', 'August', 'September', 'October', 'November', 'December'];
-        
-        String dateText = "${months[now.month - 1]} ${now.day}, ${now.year}";
-        
-        setState(() {
-          responseOutput = "Today is $dateText";
-        });
-        
-        await speak("Today is $dateText");
-      }
-      else if (command.contains("hello") || command.contains("hi")) {
+      if (command.contains("hello") || command.contains("hi")) {
         await speak("Hello! How can I help you today?");
       }
       else if (command.contains("help")) {
-        await speak("You can ask me for the time, date, or just speak to me. I'm here to assist you.");
+        await speak("You can speak to me, or type in the box to have your phone read it out loud.");
       }
       else {
         await speak("You said: $command");
@@ -336,7 +398,13 @@ class _HomePageState extends State<HomePage> {
         title: Text(_t['title']!),
         backgroundColor: Colors.blue,
         actions: [
-          // Language dropdown button
+          // Deaf/Mute users: show a reselect button on main page
+          if (disability == 'deaf' || disability == 'mute')
+            IconButton(
+              icon: const Icon(Icons.accessibility_new, size: 28),
+              onPressed: _reselectDisability,
+              tooltip: _t['reselect_disability'],
+            ),
           IconButton(
             icon: const Icon(Icons.language, size: 28),
             onPressed: _showLanguageDialog,
@@ -344,12 +412,15 @@ class _HomePageState extends State<HomePage> {
           ),
         ],
       ),
-      body: SingleChildScrollView(
-        child: Padding(
-          padding: const EdgeInsets.all(20.0),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
+      body: GestureDetector(
+        behavior: HitTestBehavior.translucent,
+        onTap: () => FocusScope.of(context).unfocus(),
+        child: SingleChildScrollView(
+          child: Padding(
+            padding: const EdgeInsets.all(20.0),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
               // Language indicator
               Container(
                 padding: const EdgeInsets.all(12),
@@ -377,8 +448,12 @@ class _HomePageState extends State<HomePage> {
               
               const SizedBox(height: 20),
 
-              // Status display - what you said
+              // Status display with dynamic height - smaller by default
               Container(
+                constraints: BoxConstraints(
+                  minHeight: 80,  // Smaller default height
+                  maxHeight: 300,
+                ),
                 padding: const EdgeInsets.all(20),
                 decoration: BoxDecoration(
                   color: isListening ? Colors.red.shade50 : Colors.blue.shade50,
@@ -389,6 +464,7 @@ class _HomePageState extends State<HomePage> {
                   ),
                 ),
                 child: Column(
+                  mainAxisSize: MainAxisSize.min, // Only take needed space
                   children: [
                     Row(
                       mainAxisAlignment: MainAxisAlignment.spaceBetween,
@@ -418,7 +494,7 @@ class _HomePageState extends State<HomePage> {
                               icon: Icon(Icons.text_increase, size: 24),
                               onPressed: () {
                                 setState(() {
-                                  if (fontSize < 36) fontSize += 2;
+                                  if (fontSize < 48) fontSize += 2;
                                 });
                               },
                               tooltip: 'Increase font size',
@@ -428,60 +504,23 @@ class _HomePageState extends State<HomePage> {
                       ],
                     ),
                     const SizedBox(height: 10),
-                    Text(
-                      isListening ? _t['listening']! : lastWords.isEmpty ? _t['press_mic']! : lastWords,
-                      style: TextStyle(
-                        fontSize: fontSize, // Use adjustable font size
-                        fontWeight: FontWeight.w500,
-                        color: isListening ? Colors.red.shade700 : Colors.black87,
+                    // Flexible instead of Expanded - only takes needed space
+                    Flexible(
+                      child: SingleChildScrollView(
+                        child: Text(
+                          isListening ? _t['listening']! : lastWords.isEmpty ? _t['press_mic']! : lastWords,
+                          style: TextStyle(
+                            fontSize: fontSize,
+                            fontWeight: FontWeight.w500,
+                            color: isListening ? Colors.red.shade700 : Colors.black87,
+                          ),
+                          textAlign: TextAlign.center,
+                        ),
                       ),
-                      textAlign: TextAlign.center,
                     ),
                   ],
                 ),
               ),
-
-              // NEW: Response Output Display
-              if (responseOutput.isNotEmpty) ...[
-                const SizedBox(height: 20),
-                Container(
-                  padding: const EdgeInsets.all(20),
-                  decoration: BoxDecoration(
-                    color: Colors.green.shade50,
-                    borderRadius: BorderRadius.circular(15),
-                    border: Border.all(color: Colors.green, width: 2),
-                  ),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Row(
-                        children: [
-                          const Icon(Icons.volume_up, color: Colors.green, size: 28),
-                          const SizedBox(width: 10),
-                          Text(
-                            _t['response']!,
-                            style: const TextStyle(
-                              fontSize: 16,
-                              fontWeight: FontWeight.bold,
-                              color: Colors.green,
-                            ),
-                          ),
-                        ],
-                      ),
-                      const SizedBox(height: 10),
-                      Text(
-                        responseOutput,
-                        style: TextStyle(
-                          fontSize: fontSize, // Use adjustable font size
-                          fontWeight: FontWeight.w600,
-                          color: Colors.black87,
-                        ),
-                        textAlign: TextAlign.center,
-                      ),
-                    ],
-                  ),
-                ),
-              ],
 
               const SizedBox(height: 30),
 
@@ -502,22 +541,50 @@ class _HomePageState extends State<HomePage> {
 
               const SizedBox(height: 20),
 
-              // Text input for non-verbal users
-              TextField(
-                controller: textController,
-                decoration: InputDecoration(
-                  labelText: _t['type_to_speak']!,
-                  labelStyle: const TextStyle(fontSize: 16),
-                  border: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(10),
-                  ),
-                  suffixIcon: IconButton(
-                    icon: const Icon(Icons.volume_up, size: 28),
-                    onPressed: speakTextInput,
-                  ),
+              // Text input for non-verbal users - expandable
+              Container(
+                constraints: BoxConstraints(
+                  minHeight: 60,
+                  maxHeight: 200,
                 ),
-                style: const TextStyle(fontSize: 18),
-                onSubmitted: (value) => speakTextInput(),
+                child: TextField(
+                  controller: textController,
+                  maxLines: null,
+                  minLines: 1,
+                  keyboardType: TextInputType.multiline,
+                  textInputAction: TextInputAction.done,
+                  decoration: InputDecoration(
+                    labelText: _t['type_to_speak']!,
+                    labelStyle: const TextStyle(fontSize: 16),
+                    border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(10),
+                    ),
+                    suffixIcon: IconButton(
+                      icon: const Icon(Icons.keyboard_hide, size: 28),
+                      tooltip: _t['hide_keyboard'],
+                      onPressed: () => FocusScope.of(context).unfocus(),
+                    ),
+                    alignLabelWithHint: true,
+                  ),
+                  style: TextStyle(fontSize: fontSize),
+                  onEditingComplete: () => FocusScope.of(context).unfocus(),
+                  onSubmitted: (value) => speakTextInput(),
+                ),
+              ),
+
+              const SizedBox(height: 10),
+
+              // Speak typed text button (keeps keyboard dismiss separate)
+              ElevatedButton.icon(
+                onPressed: speakTextInput,
+                icon: const Icon(Icons.volume_up, size: 24),
+                label: Text(
+                  currentLanguage == 'zh' ? '朗读输入内容' : 'Speak typed text',
+                  style: const TextStyle(fontSize: 16),
+                ),
+                style: ElevatedButton.styleFrom(
+                  padding: const EdgeInsets.all(15),
+                ),
               ),
 
               const SizedBox(height: 30),
@@ -585,33 +652,10 @@ class _HomePageState extends State<HomePage> {
                 ),
               ),
 
-              const SizedBox(height: 30),
-
-              // Quick commands help
-              Container(
-                padding: const EdgeInsets.all(15),
-                decoration: BoxDecoration(
-                  color: Colors.grey.shade100,
-                  borderRadius: BorderRadius.circular(10),
-                ),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      _t['try_saying']!,
-                      style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
-                    ),
-                    const SizedBox(height: 5),
-                    Text(_t['what_time']!, style: const TextStyle(fontSize: 15)),
-                    Text(_t['what_date']!, style: const TextStyle(fontSize: 15)),
-                    Text(_t['hello']!, style: const TextStyle(fontSize: 15)),
-                    Text(_t['help']!, style: const TextStyle(fontSize: 15)),
-                  ],
-                ),
-              ),
             ],
           ),
         ),
+      ),
       ),
     );
   }
