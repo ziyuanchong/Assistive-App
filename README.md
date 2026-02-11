@@ -83,26 +83,25 @@ Xcode is required to run the app on iOS.
 
 Install from the Mac App Store, then run:
 
-```bash
+`bash
 sudo xcode-select --switch /Applications/Xcode.app/Contents/Developer
 sudo xcodebuild -runFirstLaunch
-sudo xcodebuild -license```
+sudo xcodebuild -license`
 
 ### Install CocoaPods:
+`sudo gem install cocoapods`
 
-```sudo gem install cocoapods
-
-###Verify Environment
-```flutter doctor``
+### Verify Environment:
+`flutter doctor`
 Resolve any reported issues.
 
 ### Running the App
 Clone the repository:
-```git clone <repository-url>
-cd visual-audio-buddy```
+`git clone <repository-url>
+cd visual-audio-buddy`
 
 ### Install dependencies:
-```flutter pub get```
+`flutter pub get`
 
 ### Run:
-```flutter run```
+`flutter run`
