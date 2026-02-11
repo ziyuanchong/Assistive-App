@@ -97,9 +97,36 @@ class _AllergenScannerState extends State<AllergenScanner> {
     _initializeCamera();
     _initTts();
     
-    // Auto-start live scan for blind users
+    // Auto-start live scan for blind users with audio guidance
     if (widget.autoStartLiveScan) {
-      WidgetsBinding.instance.addPostFrameCallback((_) {
+      WidgetsBinding.instance.addPostFrameCallback((_) async {
+        // Wait a bit to ensure camera is ready and previous TTS has finished
+        await Future.delayed(Duration(milliseconds: 800));
+        
+        // Announce live scan is starting
+        final msg = widget.language == 'zh'
+            ? '实时扫描已启动。请将摄像头对准成分标签。'
+            : 'Live scan started. Point the camera at the ingredient label.';
+        
+        // Set up completion handler
+        bool speechCompleted = false;
+        _tts.setCompletionHandler(() {
+          speechCompleted = true;
+        });
+        
+        await _tts.speak(msg);
+        
+        // Wait for speech to complete
+        int waitCount = 0;
+        while (!speechCompleted && waitCount < 80) {
+          await Future.delayed(Duration(milliseconds: 100));
+          waitCount++;
+        }
+        
+        // Small buffer
+        await Future.delayed(Duration(milliseconds: 300));
+        
+        // Now start live scan
         _startLiveScan();
         setState(() => _liveScanEnabled = true);
       });
@@ -303,8 +330,8 @@ class _AllergenScannerState extends State<AllergenScanner> {
     _liveScanTimer = Timer.periodic(_liveScanInterval, (_) => _runLiveScanCycle());
     // Initial hint for blind users
     _tts.speak(widget.language == 'zh'
-        ? '实时扫描已开启。请将手机对准成分表。'
-        : 'Live scan on. Point your phone at the ingredient list.');
+        ? '摄像头正在进行实时扫描，请将手机对准成分表。'
+        : 'The camera is now doing live scanning. Point your phone at the ingredient list.');
   }
 
   void _stopLiveScan() {
@@ -557,33 +584,44 @@ class _AllergenScannerState extends State<AllergenScanner> {
                     ],
                   ),
                 ),
-                child: Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                // Wrap prevents RenderFlex overflow on smaller widths (esp. English labels)
+                child: Wrap(
+                  alignment: WrapAlignment.center,
+                  spacing: 12,
+                  runSpacing: 10,
                   children: [
                     // Retake button
                     TextButton.icon(
                       onPressed: _retake,
-                      icon: Icon(Icons.refresh, color: Colors.white, size: 24),
+                      icon: Icon(Icons.refresh, color: Colors.white, size: 22),
                       label: Text(
                         _t['retake']!,
-                        style: TextStyle(color: Colors.white, fontSize: 16),
+                        style: TextStyle(color: Colors.white, fontSize: 15),
+                      ),
+                      style: TextButton.styleFrom(
+                        visualDensity: VisualDensity.compact,
+                        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
                       ),
                     ),
-                    
+
                     // Crop button
                     TextButton.icon(
                       onPressed: _cropImage,
-                      icon: Icon(Icons.crop, color: Colors.white, size: 24),
+                      icon: Icon(Icons.crop, color: Colors.white, size: 22),
                       label: Text(
                         _t['crop']!,
-                        style: TextStyle(color: Colors.white, fontSize: 16),
+                        style: TextStyle(color: Colors.white, fontSize: 15),
+                      ),
+                      style: TextButton.styleFrom(
+                        visualDensity: VisualDensity.compact,
+                        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
                       ),
                     ),
-                    
+
                     // Use photo button
                     ElevatedButton.icon(
                       onPressed: _isProcessing ? null : _processImage,
-                      icon: _isProcessing 
+                      icon: _isProcessing
                           ? SizedBox(
                               width: 18,
                               height: 18,
@@ -592,15 +630,16 @@ class _AllergenScannerState extends State<AllergenScanner> {
                                 valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
                               ),
                             )
-                          : Icon(Icons.check, size: 24),
+                          : Icon(Icons.check, size: 22),
                       label: Text(
                         _isProcessing ? _t['processing']! : _t['use_photo']!,
-                        style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+                        style: TextStyle(fontSize: 15, fontWeight: FontWeight.bold),
                       ),
                       style: ElevatedButton.styleFrom(
                         backgroundColor: Colors.blue,
                         foregroundColor: Colors.white,
-                        padding: EdgeInsets.symmetric(horizontal: 24, vertical: 12),
+                        visualDensity: VisualDensity.compact,
+                        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
                         shape: RoundedRectangleBorder(
                           borderRadius: BorderRadius.circular(25),
                         ),

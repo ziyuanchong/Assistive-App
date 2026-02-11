@@ -39,10 +39,11 @@ class _DisabilitySelectionScreenState extends State<DisabilitySelectionScreen> {
     'confirm_deaf': '您选择了：聋人。请再次按一次确认。长按3秒可重新选择。',
     'confirm_mute': '您选择了：哑人。请再次按两次确认。长按3秒可重新选择。',
     'confirm_blind': '您选择了：盲人。请再次按三次确认。长按3秒可重新选择。',
+    'blind_live_scan_start': '摄像头正在实时扫描。',
     'reset_done': '已重置，请重新选择。',
     'loading': '正在加载...',
   } : {
-    'instructions': 'Press the button once if you are deaf, press the button twice if you are mute, press the button thrice if you are blind',
+    'instructions': 'Press the bottom half of the screen once if you are deaf, press it twice if you are mute, press it thrice if you are blind',
     'selected_deaf': 'Selected: Deaf',
     'selected_mute': 'Selected: Mute',
     'selected_blind': 'Selected: Blind',
@@ -50,6 +51,7 @@ class _DisabilitySelectionScreenState extends State<DisabilitySelectionScreen> {
     'confirm_deaf': 'You selected Deaf. Tap once again to confirm. Hold 3 seconds to reselect.',
     'confirm_mute': 'You selected Mute. Tap twice again to confirm. Hold 3 seconds to reselect.',
     'confirm_blind': 'You selected Blind. Tap three times again to confirm. Hold 3 seconds to reselect.',
+    'blind_live_scan_start': 'The camera is now doing live scanning.',
     'reset_done': 'Reset done. Please select again.',
     'loading': 'Loading...',
   };
@@ -137,7 +139,7 @@ class _DisabilitySelectionScreenState extends State<DisabilitySelectionScreen> {
               ? _t['confirm_mute']!
               : _t['confirm_blind']!;
 
-      // Speak confirmation prompt (deaf users won't rely on TTS anyway, but it's harmless)
+      // Speak confirmation prompt
       await _tts.speak(confirmMsg);
       return;
     }
@@ -165,8 +167,11 @@ class _DisabilitySelectionScreenState extends State<DisabilitySelectionScreen> {
     
     // Save preference
     SharedPreferences prefs = await SharedPreferences.getInstance();
-    String disabilityKey = confirmed.name; // 'deaf', 'mute', or 'blind'
+    String disabilityKey = confirmed.name;
     await prefs.setString('disability', disabilityKey);
+    
+    // Vibrate for confirmation
+    HapticFeedback.heavyImpact();
     
     // Visual feedback
     String message = '';
@@ -175,25 +180,38 @@ class _DisabilitySelectionScreenState extends State<DisabilitySelectionScreen> {
     } else if (confirmed == DisabilityType.mute) {
       message = _t['selected_mute']!;
     } else if (confirmed == DisabilityType.blind) {
-      message = _t['selected_blind']!;
+      message = _t['selected_blind']! + ' ' + _t['blind_live_scan_start']!;
     }
     
-    // Speak confirmation (except for deaf users)
+    // IMPORTANT: Speak confirmation and WAIT for it to complete
     if (confirmed != DisabilityType.deaf) {
+      // Set up completion handler to track when speech finishes
+      bool speechCompleted = false;
+      _tts.setCompletionHandler(() {
+        speechCompleted = true;
+      });
+      
+      // Start speaking
       await _tts.speak(message);
+      
+      // Wait for speech to complete (with timeout)
+      int waitCount = 0;
+      while (!speechCompleted && waitCount < 100) { // Max 10 seconds
+        await Future.delayed(Duration(milliseconds: 100));
+        waitCount++;
+      }
+      
+      // Small additional buffer to ensure audio doesn't cut
+      await Future.delayed(Duration(milliseconds: 500));
     }
     
-    // Vibrate for confirmation
-    HapticFeedback.heavyImpact();
-    
-    // Show loading briefly, then navigate
+    // Show loading briefly
     if (mounted) {
       setState(() {});
-      await Future.delayed(Duration(milliseconds: 1500));
+      await Future.delayed(Duration(milliseconds: 500));
       
       // Navigate based on disability
       if (mounted) {
-        SharedPreferences prefs = await SharedPreferences.getInstance();
         String language = prefs.getString('language') ?? 'en';
         
         if (confirmed == DisabilityType.blind) {
@@ -244,7 +262,7 @@ class _DisabilitySelectionScreenState extends State<DisabilitySelectionScreen> {
           child: Padding(
             padding: const EdgeInsets.all(30.0),
             child: Column(
-              mainAxisAlignment: MainAxisAlignment.center,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
                 // Instructions text at top
                 Container(
@@ -272,52 +290,65 @@ class _DisabilitySelectionScreenState extends State<DisabilitySelectionScreen> {
                   ),
                 ),
                 
-                const SizedBox(height: 60),
-                
-                // Large tap button
-                GestureDetector(
-                  onTap: _handleTap,
-                  onLongPressStart: (_) => _onHoldStart(),
-                  onLongPressEnd: (_) => _onHoldEnd(),
-                  child: Container(
-                    width: 200,
-                    height: 200,
-                    decoration: BoxDecoration(
-                      shape: BoxShape.circle,
-                      color: Colors.blue,
-                      boxShadow: [
-                        BoxShadow(
-                          color: Colors.blue.withOpacity(0.5),
-                          blurRadius: 20,
-                          spreadRadius: 5,
-                        ),
-                      ],
-                    ),
-                    child: Center(
-                      child: Column(
-                        mainAxisAlignment: MainAxisAlignment.center,
-                        children: [
-                          Icon(
-                            Icons.touch_app,
-                            size: 80,
-                            color: Colors.white,
-                          ),
-                          const SizedBox(height: 10),
-                          Text(
-                            '$_tapCount',
-                            style: TextStyle(
-                              fontSize: 40,
-                              fontWeight: FontWeight.bold,
-                              color: Colors.white,
-                            ),
+                const SizedBox(height: 24),
+
+                // Big bottom-half tap area (easier for blind users)
+                Expanded(
+                  child: GestureDetector(
+                    onTap: _handleTap,
+                    onLongPressStart: (_) => _onHoldStart(),
+                    onLongPressEnd: (_) => _onHoldEnd(),
+                    child: Container(
+                      width: double.infinity,
+                      decoration: BoxDecoration(
+                        color: Colors.blue,
+                        borderRadius: BorderRadius.circular(28),
+                        boxShadow: [
+                          BoxShadow(
+                            color: Colors.blue.withOpacity(0.5),
+                            blurRadius: 24,
+                            spreadRadius: 6,
                           ),
                         ],
+                      ),
+                      child: Center(
+                        child: Column(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          children: [
+                            Icon(
+                              Icons.touch_app,
+                              size: 92,
+                              color: Colors.white,
+                            ),
+                            const SizedBox(height: 14),
+                            Text(
+                              '$_tapCount',
+                              style: TextStyle(
+                                fontSize: 52,
+                                fontWeight: FontWeight.bold,
+                                color: Colors.white,
+                              ),
+                            ),
+                            const SizedBox(height: 10),
+                            Text(
+                              _currentLanguage == 'zh'
+                                  ? '点击 1 / 2 / 3 次选择，长按 3 秒重置'
+                                  : 'Tap 1 / 2 / 3 times to choose, hold 3s to reset',
+                              style: TextStyle(
+                                fontSize: 16,
+                                fontWeight: FontWeight.w600,
+                                color: Colors.white.withOpacity(0.95),
+                              ),
+                              textAlign: TextAlign.center,
+                            ),
+                          ],
+                        ),
                       ),
                     ),
                   ),
                 ),
-                
-                const SizedBox(height: 40),
+
+                const SizedBox(height: 18),
                 
                 // Tap count indicator
                 if (_tapCount > 0)
@@ -341,7 +372,7 @@ class _DisabilitySelectionScreenState extends State<DisabilitySelectionScreen> {
                     ),
                   ),
 
-                const SizedBox(height: 20),
+                const SizedBox(height: 14),
 
                 if (_pendingDisability != null)
                   Text(
