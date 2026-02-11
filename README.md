@@ -92,7 +92,7 @@ sudo xcodebuild -license`
 `sudo gem install cocoapods`
 
 ### Verify Environment:
-`flutter doctor`
+`flutter doctor`</br>
 Resolve any reported issues.
 
 ### Running the App
